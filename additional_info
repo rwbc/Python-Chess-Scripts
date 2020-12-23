@@ -9,13 +9,14 @@ created 2020-12-21
 KNOWN ENGINES:
 - Rybka 1.0b
 - Gaviota
-others (surely a few dozen)
+- others (surely a few dozen)
 
 CUTECHESS still saves the time sometimes, either as
 {0s} or in the range {0.001s} - {0.004s}
 found no case with a time above {0.004s} yet
 
-=> plot.py 0.91 currrently will exit on those (TODO)
+=> plot.py 0.91 currrently will exit on those (DONE!)
+= FIXED ALREADY
 
 
 
@@ -28,6 +29,9 @@ Saved from an old email (2005-12) for additional features in Winboard_AS (= Ales
 Output list/description:
 (refined 2020-12-23 after looking at old and fresh created pgn files)
 
+a) unproblematic cases for eval graph (eval remains between 0.00 and 0.02 for book moves)
+-----------------------------------------------------------------------------------------
+
 - Celes (31337) sends +0.00/1
 - Queen sends +0.00/1
 - Grizzly sends +0.00/1
@@ -39,17 +43,25 @@ Output list/description:
 - Terra sends +0.00/2
 - KnightX 1.92 sends +0.00/2
 
+- SpiderChess sends +0.00/3 +0.00/8 +0.00/12
+
 - Dimitri 1.36 sends +0.01/1
 - Hiarcs X50/X54 sends +0.01/1
 - Leila sends +0.01/2
-- Abrok sends +0.02/99
 - Wildcat 2.79 sends +0.01/99
+
+- Abrok sends +0.02/99
+
+b) problematic cases for eval graph (erratic eval shown when in book)
+-----------------------------------------------------------------------------------------
+
 - Ant 2005-K sends +50.00/1
 - Ant 6.06 sends +50.00/2
-- SpiderChess sends +0.00/3 +0.00/8 +0.12/3
 - FranMad sends eval/1 or eval/2
 - Snitch sends eval/1
 
+c) hmmmm?
+-----------------------------------------------------------------------------------------
 - Pepito does a book search by default
 - Tinker does a book search (by default?)
 
