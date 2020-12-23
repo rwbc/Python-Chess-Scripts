@@ -21,7 +21,7 @@ Usage:
 """
 
 
-__version__ = 'v0.9.0'
+__version__ = 'v0.15.0'
 __author__ = 'fsmosca'
 __credits__ = ['rwbc']
 __script_name__ = 'Eval and Time Game Plotter'
@@ -30,6 +30,7 @@ __goal__ = 'Read pgn file and save eval and time plot per game.'
 
 import argparse
 import time
+from typing import List, Set, Dict, Tuple, Optional
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -80,6 +81,105 @@ class GameInfoPlotter:
 
         return tick_spacing
 
+    def get_eval(
+            self,
+            comment: str,
+            turn: bool,
+            ply: int,
+            black_eval: List[float],
+            white_eval: List[float]
+    ) -> float:
+        """
+        Returns move_eval with SPOV in pawn unit.
+        """
+        move_eval = 0.0
+
+        if 'book' in comment.lower():
+            return move_eval
+
+        if comment == '':
+            if ply % 2:
+                move_eval = -black_eval[-1]
+            else:
+                move_eval = white_eval[-1]
+            return move_eval
+
+        if self.tcec:
+            value = comment.split('wv=')[1].split(',')[0]
+            if 'M' in value:
+                mate_num = int(value.split('M')[1])
+
+                # Todo: Get mate score of Lc0.
+                move_eval = Mate(mate_num).score(mate_score=32000) / 100
+
+                move_eval = move_eval if turn else -move_eval
+            else:
+                move_eval = float(comment.split('wv=')[1].split(',')[0])
+                move_eval = move_eval if turn else -move_eval
+
+        # Cutechess
+        else:
+            # No eval/depth comment, just time.
+            if len(comment.split()) == 1:
+                value = comment.split('s')[0]
+                # {0}
+                try:
+                    if ply % 2:
+                        move_eval = -black_eval[-1]
+                    else:
+                        move_eval = white_eval[-1]
+                except ValueError:
+                    pass
+            elif '+M' in comment or '-M' in comment:
+                mate_num = int(comment.split('/')[0].split('M')[1])
+                move_eval = Mate(mate_num).score(mate_score=32000)
+                move_eval = (move_eval if '+M' in comment else -move_eval) / 100
+            else:
+                # Not {White mates}
+                if '/' in comment:
+                    move_eval = float(comment.split('/')[0])
+
+        return move_eval
+
+    def get_time(self, comment):
+        """
+        Brackets are not included when reading comment below.
+
+        {+13.30/12 0.020s}
+        {0}
+        {0.001}
+        {0.002}
+        """
+        elapse_sec = 0.0
+
+        if 'book' in comment.lower():
+            return elapse_sec
+
+        if comment == '':
+            return elapse_sec
+
+        # If pgn file file is from TCEC.
+        if self.tcec:
+            elapse_sec = int(comment.split('mt=')[1].split(',')[0])
+            elapse_sec = elapse_sec // 1000
+
+        # Cutechess
+        else:
+            # One part split, {0} or {0.001}, assume it is time.
+            if len(comment.split()) == 1:
+                value = comment.split('s')[0]
+                try:
+                    elapse_sec = float(value)
+                except ValueError:
+                    pass
+            # Two parts split, {+13.30/12 0.020s}, eval/depth time
+            else:
+                # Not {White mates}
+                if '/' in comment:
+                    elapse_sec = float(comment.split()[1].split('s')[0])
+
+        return elapse_sec
+
     def plotter(self, game, outputfn):
         """
         Read game get eval in the move comment and plot it.
@@ -91,7 +191,7 @@ class GameInfoPlotter:
         bp = game.headers['Black']
         res = game.headers['Result']
 
-        x, y1, y2, t1, t2 = [], [], [], [], []
+        move_num, b_eval, w_eval, b_time, w_time = [], [], [], [], []
         for node in game.mainline():
             board = node.board()
             parent_node = node.parent
@@ -100,81 +200,41 @@ class GameInfoPlotter:
             fmvn = parent_board.fullmove_number
             ply = parent_board.ply()
 
-            if 'book' in comment.lower():
-                eval = 0.0
-                tv = 0.0
-            else:
-                if self.tcec:
-                    # Mate score
-                    value = comment.split('wv=')[1].split(',')[0]
-                    if 'M' in value:
-                        eval = 1000
-                        eval = eval if parent_board.turn else -eval
-                    else:
-                        eval = float(comment.split('wv=')[1].split(',')[0])
-                        eval = eval if parent_board.turn else -eval
-
-                    # Get time
-                    if 'book' in comment.lower():
-                        tv = 0.0
-                    else:
-                        tv = int(comment.split('mt=')[1].split(',')[0])
-                        tv = tv//1000
-
-                # Cutechess
-                else:
-                    if '+M' in comment or '-M' in comment:
-                        mate_num = int(comment.split('/')[0].split('M')[1])
-                        eval = Mate(mate_num).score(mate_score=32000)
-                        eval = (eval if '+M' in comment else -eval) / 100
-                    elif comment == '':
-                        eval = 0.0
-                    else:
-                        try:
-                            eval = float(comment.split('/')[0])
-                        except ValueError:
-                            eval = 0.0
-
-                    # Get time.
-                    # +13.30/12 0.020s
-                    if comment == '':
-                        tv = 0.0
-                    else:
-                        try:
-                            tv = float(comment.split()[1].split('s')[0])
-                        except ValueError:
-                            tv = 0.0
+            move_eval = self.get_eval(comment, parent_board.turn, ply, b_eval, w_eval)
+            time_elapse_sec = self.get_time(comment)
 
             # Black
             if ply % 2:
                 # Positive eval is good for white while negative eval is good for black.
-                y1.append(-eval)
-                t1.append(tv)
+                b_eval.append(-move_eval)
+                b_time.append(time_elapse_sec)
             else:
-                y2.append(eval)
-                x.append(fmvn)
+                w_eval.append(move_eval)
+                move_num.append(fmvn)
 
-                t2.append(tv)
+                w_time.append(time_elapse_sec)
 
         fig, ax = plt.subplots(2, sharex=True, figsize=(self.fig_width, self.fig_height))
-        plt.subplots_adjust(top=0.85, hspace=0.3)
 
-        fig.suptitle(f'{wp} vs {bp}\n{ev}, {da}, Round: {rd}, {res}\n', fontsize=8)
+        plt.text(x=0.5, y=0.94, s=f"{wp} vs {bp}", fontsize=8, ha="center", transform=fig.transFigure)
+        plt.text(x=0.5, y=0.91, s=f"{ev}, {da}, Round: {rd}, {res}", fontsize=6, ha="center", transform=fig.transFigure)
+
+        plt.subplots_adjust(top=0.84, hspace=0.3)
 
         # Array should have the same size.
-        if len(x) > len(y1):
-            y1.append(y1[len(y1)-1])
-            t1.append(0)
-        if len(x) > len(y2):
-            y2.append(y2[len(y2)-1])
-            t2.append(0)
+        if len(move_num) > len(b_eval):
+            b_eval.append(b_eval[len(b_eval)-1])
+            b_time.append(0)
+        if len(move_num) > len(w_eval):
+            w_eval.append(w_eval[len(w_eval)-1])
+            w_time.append(0)
 
         line_width = 1.0
-        ax[0].plot(x, y2, color=self.white_line_color, linewidth=line_width, label=f'{wp}')
-        ax[0].plot(x, y1, color=self.black_line_color, linewidth=line_width, label=f'{bp}')
+        ax[0].plot(move_num, w_eval, color=self.white_line_color, linewidth=line_width, label=f'{wp}')
+        ax[0].plot(move_num, b_eval, color=self.black_line_color, linewidth=line_width, label=f'{bp}')
 
-        ax[1].plot(x, t2, color=self.white_line_color, linewidth=line_width, label=f'{wp}')
-        ax[1].plot(x, t1, color=self.black_line_color, linewidth=line_width, label=f'{bp}')
+        ax[1].plot(move_num, w_time, color=self.white_line_color, linewidth=line_width, label=f'{wp}')
+        ax[1].plot(move_num, b_time, color=self.black_line_color, linewidth=line_width, label=f'{bp}')
 
         ax[0].axhline(y=0.0, color='r', linestyle='-', linewidth=0.1)
         ax[1].axhline(y=0.0, color='r', linestyle='-', linewidth=0.1)
@@ -185,8 +245,8 @@ class GameInfoPlotter:
         plt.setp(ax[1].get_xticklabels(), fontsize=5)
         plt.setp(ax[1].get_yticklabels(), fontsize=5)
 
-        ax[0].set_title('Evaluation', fontsize=8)
-        ax[1].set_title('Elapse Time', fontsize=8)
+        ax[0].set_title('Evaluation', fontsize=7)
+        ax[1].set_title('Elapse Time', fontsize=7)
 
         ax[0].set_ylabel('Score in pawn unit', fontsize=5)
 
@@ -196,8 +256,8 @@ class GameInfoPlotter:
         ax[0].legend(loc='best')
         ax[1].legend(loc='best')
 
-        miny1, miny2 = min(y1), min(y2)
-        maxy1, maxy2 = max(y1), max(y2)
+        miny1, miny2 = min(b_eval), min(w_eval)
+        maxy1, maxy2 = max(b_eval), max(w_eval)
         miny = min(miny1, miny2)
         maxy = max(maxy1, maxy2)
 
@@ -209,17 +269,17 @@ class GameInfoPlotter:
 
         # Set limits along x-axis for move numbers
         if self.min_move_limit is None:
-            xmin = min(x) - 1
+            xmin = min(move_num) - 1
         else:
             xmin = self.min_move_limit - 1
         if self.max_move_limit is None:
-            xmax = len(x) + 1
+            xmax = len(move_num) + 1
         else:
             xmax = self.max_move_limit + 1
 
-        xrange = min(max(x), xmax) - max(min(x), xmin)
-        ax[0].set_xlim(max(min(x), xmin), min(max(x), xmax))
-        ax[0].set_xticks(range(max(min(x), xmin), min(max(x), xmax), 1 + xrange//20))
+        xrange = min(max(move_num), xmax) - max(min(move_num), xmin)
+        ax[0].set_xlim(max(min(move_num), xmin), min(max(move_num), xmax))
+        ax[0].set_xticks(range(max(min(move_num), xmin), min(max(move_num), xmax), 1 + xrange//20))
 
         for i in range(2):
             ax[i].grid(linewidth=0.1)
@@ -245,6 +305,8 @@ class GameInfoPlotter:
 
                 cnt += 1
                 output = f'{self.input_pgn[0:-4]}_{cnt}.png'
+
+                print(f'game: {cnt}')
 
                 self.plotter(game, output)
 
